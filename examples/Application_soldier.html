@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>app soldier</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link type="text/css" rel="stylesheet" href="main.css">
+		<footer style="font-family: Arial, sans-serif; font-weight: bold; color: #ddddff; text-align: center; background-color: #000022; padding: 18px; position: absolute; bottom: 0; width: 100%;">
+			<p> Marco Julian Garcia Fernandez 22200183. Ivan Aguilar Perez 22200175 - Application Soldier | © 2024 Todos los derechos reservados</p>
+		</footer>
+		
+	
+    <div id="container"></div>
+		
+	</head>
+
+	<body>
+		<div id="info">
+			<a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> - FBXLoader<br />
+			Character and animation from <a href="https://www.mixamo.com/" target="_blank" rel="noopener">Mixamo</a>
+		</div>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../build/three.module.js",
+					"three/addons/": "./jsm/"
+				}
+			}
+		</script>
+
+		<script type="module">
+
+			import * as THREE from 'three';
+
+			import Stats from 'three/addons/libs/stats.module.js';
+
+			import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+			import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+			import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+			import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+			// ---------------------------------------------------------------------
+			import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+			import { Audio, AudioListener, AudioLoader } from 'three';
+			// ---------------------------------------------------------------------
+
+			const manager = new THREE.LoadingManager();
+
+			let camera, scene, renderer, stats, object, loader, guiMorphsFolder;
+			let mixer;
+
+			const clock = new THREE.Clock();
+
+			const params = {
+				asset: 'Double Dagger Stab'
+			};
+
+			const assets = [
+				'Double Dagger Stab',
+				'morph_test'
+			];
+
+			init();
+
+			function init() {
+
+				const container = document.createElement( 'div' );
+				document.body.appendChild( container );
+
+				camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 3000);
+                camera.position.set(200, 50, 700);
+				camera.lookAt(0, 100, 0);
+
+
+				// Modificar la posición de la cámara en cada frame
+				function updateCameraWithArrows(delta) {
+					const moveDistance = cameraSpeed * delta; // Distancia de movimiento basada en el tiempo
+
+					if (moveUp) camera.position.z -= moveDistance;
+					if (moveDown) camera.position.z += moveDistance;
+					if (moveCameraLeft) camera.position.x -= moveDistance;
+					if (moveCameraRight) camera.position.x += moveDistance;
+
+				}
+
+				scene = new THREE.Scene();
+				scene.background = new THREE.Color( 0xa0a0a0 );
+				scene.fog = new THREE.Fog(0x000010, 500, 1600);
+
+				// Luz ambiental tenue para la atmósfera nocturna
+				const ambientLight = new THREE.AmbientLight( 0x222222, 0.2 ); // Luz suave general
+				scene.add( ambientLight );
+
+				// Luz direccional simulando la luna
+				const moonLight = new THREE.DirectionalLight( 0x9999ff, 0.8 ); // Luz azul tenue
+				moonLight.position.set( -300, 500, -100 ); // Posición simulando la luna
+				moonLight.castShadow = true;
+				moonLight.shadow.mapSize.width = 4096;
+				moonLight.shadow.mapSize.height = 4096;
+
+				scene.add( moonLight );
+
+
+				// scene.add( new THREE.CameraHelper( dirLight.shadow.camera ) );
+
+				// ground (con textura GLTF)
+
+
+				const gltfLoader = new GLTFLoader();
+				gltfLoader.load('models/texture/dry_riverbed_rock_4k.gltf/dry_riverbed_rock_4k.gltf', function (gltf) {
+				const planeGeometry = new THREE.PlaneGeometry(2000, 2000);
+				const planeMaterial = new THREE.MeshStandardMaterial({
+						map: gltf.scene.children[0].material.map,
+						side: THREE.DoubleSide,
+				});
+
+					const mesh = new THREE.Mesh(planeGeometry, planeMaterial);
+					mesh.rotation.x = -Math.PI / 2; // Coloca el plano horizontalmente
+					mesh.receiveShadow = true;     // Habilita la recepción de sombras
+
+					scene.add(mesh);
+});
+				const grid = new THREE.GridHelper( 2000, 20, 0x000000, 0x000000 );
+				grid.material.opacity = 0.2;
+				grid.material.transparent = false;
+				scene.add( grid );
+			
+				loader = new FBXLoader( manager );
+				loadAsset( params.asset );
+
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				renderer.setAnimationLoop( animate );
+				renderer.shadowMap.enabled = true;
+				renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+				container.appendChild( renderer.domElement );
+
+				const controls = new OrbitControls( camera, renderer.domElement );
+				controls.target.set( 0, 100, 0 );
+				controls.update();
+
+				window.addEventListener( 'resize', onWindowResize );
+
+				// stats
+				stats = new Stats();
+				container.appendChild( stats.dom );
+
+				const gui = new GUI();
+				gui.add( params, 'asset', assets ).onChange( function ( value ) {
+
+					loadAsset( value );
+
+				} );
+
+				guiMorphsFolder = gui.addFolder( 'Morphs' ).hide();
+
+				// --------------------------------------------------------------
+				const rgbeLoader = new RGBELoader();
+				rgbeLoader.load('models/rgbe/museum_of_history_4k.hdr', function (texture) {
+					texture.mapping = THREE.EquirectangularReflectionMapping;
+					scene.background = texture;
+					scene.environment = texture;
+				});
+
+				const listener = new AudioListener();
+                camera.add(listener);
+				const sound = new Audio(listener);
+				const audioLoader = new AudioLoader();
+				
+				// Cargar el archivo de audio
+				audioLoader.load('models/rgbe/candy-bar-239307.mp3', function (buffer) {
+					console.log("Audio cargado exitosamente");
+					sound.setBuffer(buffer);
+					sound.setLoop(true);
+					sound.setVolume(0.5);
+				
+					// Reproducción de audio con reinicio al hacer clic en el botón
+					document.getElementById("playAudioButton").addEventListener("click", function () {
+						if (sound.isPlaying) {
+							sound.stop();  // Detener el audio si ya está en reproducción
+						}
+						sound.play();  // Reproducir desde el inicio
+						console.log("Reproducción de audio iniciada o reiniciada.");
+					});
+				});
+
+
+			}
+
+			function loadAsset( asset ) {
+
+				loader.load( 'models/fbx/' + asset + '.fbx', function ( group ) {
+
+					if ( object ) {
+
+						object.traverse( function ( child ) {
+
+							if ( child.material ) {
+
+								const materials = Array.isArray( child.material ) ? child.material : [ child.material ];
+								materials.forEach( material => {
+
+									if ( material.map ) material.map.dispose();
+									material.dispose();
+			
+								} );
+			
+							}
+			
+							if ( child.geometry ) child.geometry.dispose();
+
+						} );
+
+						scene.remove( object );
+
+					}
+
+					//
+
+					object = group;
+
+					if ( object.animations && object.animations.length ) {
+
+						mixer = new THREE.AnimationMixer( object );
+
+						const action = mixer.clipAction( object.animations[ 0 ] );
+						action.play();
+
+					} else {
+
+						mixer = null;
+
+					}
+
+					guiMorphsFolder.children.forEach( ( child ) => child.destroy() );
+					guiMorphsFolder.hide();
+
+					object.traverse( function ( child ) {
+
+						if ( child.isMesh ) {
+
+							// -----------------------------------------------------------
+
+							// Aplicar un material de agua o translúcido al modelo
+
+							child.material = new THREE.MeshStandardMaterial({
+							color: 0xff51,          // Color sólido
+							transparent: false,     // Asegúrate de que la transparencia esté desactivada
+							opacity: 1,             // Totalmente opaco
+							roughness: 0.5,         // Rugosidad moderada
+							metalness: 0.3,         // Menor reflejo metálico para evitar efectos indeseados
+							depthWrite: true,       // Escribir en el búfer de profundidad
+							depthTest: true         // Respetar el búfer de profundidad
+						});
+
+							// -----------------------------------------------------------
+
+							child.castShadow = true;
+							child.receiveShadow = true
+
+
+
+							if ( child.morphTargetDictionary ) {
+
+								guiMorphsFolder.show();
+								const meshFolder = guiMorphsFolder.addFolder( child.name || child.uuid );
+								Object.keys( child.morphTargetDictionary ).forEach( ( key ) => {
+			
+									meshFolder.add( child.morphTargetInfluences, child.morphTargetDictionary[ key ], 0, 1, 0.01 );
+			
+								} );
+			
+							}
+
+						}
+
+					} );
+
+					scene.add( object );
+
+				} );
+
+			}
+
+			function onWindowResize() {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+			}
+
+//
+
+let isAnimating = true; // Estado inicial de la animación
+
+document.addEventListener('keydown', (event) => {
+    if (event.code === 'KeyP') { // Usa la barra espaciadora para controlar la animación
+        if (mixer) {
+            if (isAnimating) {
+                mixer.stopAllAction(); // Detener todas las acciones
+                console.log('Animación detenida');
+            } else {
+                const action = mixer.clipAction(object.animations[0]);
+                action.play(); // Iniciar la animación principal
+                console.log('Animación iniciada');
+            }
+            isAnimating = !isAnimating; // Alternar el estado
+        }
+    }
+});
+
+// Variables para el movimiento de la cámara con flechas
+let moveUp = false;
+let moveDown = false;
+let moveCameraLeft = false;
+let moveCameraRight = false;
+const cameraSpeed = 10; // Velocidad de movimiento
+
+// Detectar teclas presionadas
+document.addEventListener('keydown', (event) => {
+    switch (event.code) {
+        case 'ArrowUp': // Mover hacia adelante
+            moveUp = true;
+            break;
+        case 'ArrowDown': // Mover hacia atrás
+            moveDown = true;
+            break;
+		case 'ArrowLeft': // Mover la cámara hacia la izquierda
+            moveCameraLeft = true;
+            break;
+        case 'ArrowRight': // Mover la cámara hacia la derecha
+            moveCameraRight = true;
+            break;
+
+    }
+});
+
+// Detectar teclas liberadas
+document.addEventListener('keyup', (event) => {
+    switch (event.code) {
+        case 'ArrowUp': // Detener movimiento hacia adelante
+            moveUp = false;
+            break;
+        case 'ArrowDown': // Detener movimiento hacia atrás
+            moveDown = false;
+            break;
+        case 'ArrowLeft': // Detener movimiento hacia la izquierda
+            moveCameraLeft = false;
+            break;
+        case 'ArrowRight': // Detener movimiento hacia la derecha
+            moveCameraRight = false;
+            break;
+    }
+});
+
+
+let moveForward = false;
+let moveBackward = false;
+let moveLeft = false;
+let moveRight = false;
+
+
+// Eventos de teclado para controlar el personaje
+document.addEventListener('keydown', (event) => {
+    switch (event.code) {
+        case 'KeyS': // Avanzar
+            moveForward = true;
+            break;
+        case 'KeyW': // Retroceder
+            moveBackward = true;
+            break;
+        case 'KeyA': // Mover a la izquierda
+            moveLeft = true;
+            break;
+        case 'KeyD': // Mover a la derecha
+            moveRight = true;
+            break;
+    }
+});
+
+document.addEventListener('keyup', (event) => {
+    switch (event.code) {
+        case 'KeyS': // Detener avance
+            moveForward = false;
+            break;
+        case 'KeyW': // Detener retroceso
+            moveBackward = false;
+            break;
+        case 'KeyA': // Detener movimiento izquierda
+            moveLeft = false;
+            break;
+        case 'KeyD': // Detener movimiento derecha
+            moveRight = false;
+            break;
+    }
+});
+
+function animate() {
+    const delta = clock.getDelta();
+
+    // Control de movimiento del personaje
+    if (object) {
+        const moveSpeed = 50 * delta; // Velocidad de movimiento
+        const strafeSpeed = 30 * delta; // Velocidad lateral
+
+        if (moveForward) {
+            const forwardVector = new THREE.Vector3(0, 0, -1);
+            forwardVector.applyQuaternion(object.quaternion); // Orientar según rotación
+            object.position.addScaledVector(forwardVector, moveSpeed);
+        }
+
+        if (moveBackward) {
+            const backwardVector = new THREE.Vector3(0, 0, 1);
+            backwardVector.applyQuaternion(object.quaternion); // Orientar según rotación
+            object.position.addScaledVector(backwardVector, moveSpeed);
+        }
+
+        if (moveLeft) {
+            const leftVector = new THREE.Vector3(-1, 0, 0);
+            leftVector.applyQuaternion(object.quaternion); // Orientar según rotación
+            object.position.addScaledVector(leftVector, strafeSpeed);
+        }
+
+        if (moveRight) {
+            const rightVector = new THREE.Vector3(1, 0, 0);
+            rightVector.applyQuaternion(object.quaternion); // Orientar según rotación
+            object.position.addScaledVector(rightVector, strafeSpeed);
+        }
+    }
+
+	    // Control de movimiento de la cámara con flechas
+		const moveDistance = cameraSpeed * delta * 10;
+    if (moveUp) camera.position.z -= moveDistance;
+    if (moveDown) camera.position.z += moveDistance;
+	if (moveCameraLeft) camera.position.x -= moveDistance;
+	if (moveCameraRight) camera.position.x += moveDistance;
+
+    if (mixer) mixer.update(delta);
+
+    renderer.render(scene, camera);
+    stats.update();
+}
+
+				const delta = clock.getDelta();
+
+				if ( mixer ) mixer.update( delta );
+
+				renderer.render( scene, camera );
+
+				stats.update();
+
+		</script>
+
+
+	</body>
+</html>
